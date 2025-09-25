@@ -5,7 +5,7 @@ import javax.servlet.*;
 import javax.servlet.http.*;
 import javax.servlet.annotation.WebServlet;
 
-@WebServlet("/*")
+@WebServlet("/")
 public class NotFoundServlet extends HttpServlet {
 
     @Override
