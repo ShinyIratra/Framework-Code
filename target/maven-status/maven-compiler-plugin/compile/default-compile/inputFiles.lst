@@ -1,3 +1,5 @@
-C:\Users\Iratra\Desktop\Projet\ITU\Framework\Framework-Code\src\main\java\framework\ControllerAnnot.java
-C:\Users\Iratra\Desktop\Projet\ITU\Framework\Framework-Code\src\main\java\framework\FrontServlet.java
-C:\Users\Iratra\Desktop\Projet\ITU\Framework\Framework-Code\src\main\java\framework\UrlAnnot.java
+C:\Users\Iratra\Desktop\Projet\ITU\Framework\Framework-Code\src\main\java\framework\annotation\ControllerAnnot.java
+C:\Users\Iratra\Desktop\Projet\ITU\Framework\Framework-Code\src\main\java\framework\annotation\UrlAnnot.java
+C:\Users\Iratra\Desktop\Projet\ITU\Framework\Framework-Code\src\main\java\framework\servlet\FrontServlet.java
+C:\Users\Iratra\Desktop\Projet\ITU\Framework\Framework-Code\src\main\java\framework\util\ProjectConfig.java
+C:\Users\Iratra\Desktop\Projet\ITU\Framework\Framework-Code\src\main\java\framework\util\ProjectScanner.java

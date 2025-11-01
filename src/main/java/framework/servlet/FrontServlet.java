@@ -1,4 +1,4 @@
-package framework;
+package framework.servlet;
 
 import java.io.IOException;
 import java.io.PrintWriter;
