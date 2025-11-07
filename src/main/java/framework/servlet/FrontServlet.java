@@ -66,30 +66,68 @@ public class FrontServlet extends HttpServlet
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse rep) throws ServletException, IOException
     {
-        customRedirect(req, rep);
+        try {
+            customRedirect(req, rep);
+        } catch (ReflectiveOperationException e) {
+            throw new ServletException("Error invoking controller method", e);
+        }
     }
 
-    private void customRedirect(HttpServletRequest req, HttpServletResponse rep) throws IOException, ServletException
+    private void customRedirect(HttpServletRequest req, HttpServletResponse rep) throws IOException, ServletException, ReflectiveOperationException
     {
         String path = req.getRequestURI().substring(req.getContextPath().length());
 
         boolean pathExists = getServletContext().getResource(path) != null;
 
-        PrintWriter writer = rep.getWriter();
-
         if (routes.containsKey(path))
         {
             Class<?> clazz = routes.get(path);
-            String packageName = clazz.getPackageName();
-            writer.println(packageName + "." + clazz.getSimpleName() + " : " + path);
+
+            afficher(clazz, path, req, rep);
         }
         // Introuvable
         else
         {
+            PrintWriter writer = rep.getWriter();
             writer.println("Chemin introuvable : ");
             writer.println(path);
             rep.setStatus(HttpServletResponse.SC_NOT_FOUND);
         }
-        
+    }
+
+    void afficher(Class<?> clazz, String path, HttpServletRequest req, HttpServletResponse rep) throws IOException, ServletException, ReflectiveOperationException
+    {
+        Method[] methods = clazz.getMethods();
+        for (Method method : methods)
+        {
+            if(method.isAnnotationPresent(UrlAnnot.class))
+            {   
+                UrlAnnot url = method.getAnnotation(UrlAnnot.class);
+
+                if(url.value().equals(path))
+                {
+                    Object instance = clazz.getDeclaredConstructor().newInstance();
+                    Object resultat = method.invoke(instance);
+
+                    switch(method.getReturnType().getName())
+                    {
+                        case "java.lang.String":
+                            {
+                                PrintWriter writer = rep.getWriter();
+                                String vue = (String) resultat;
+                                writer.println(vue);
+                                break;
+                            }
+                            
+                        default:
+                            {
+                                PrintWriter writer = rep.getWriter();
+                                writer.println("Type de retour non géré : " + method.getReturnType().getName());
+                                break;
+                            }
+                    }
+                }
+            }
+        }
     }
 }
