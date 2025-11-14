@@ -16,11 +16,16 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+/** 
+    Import custom
+*/
 import framework.annotation.ControllerAnnot;
 import framework.annotation.UrlAnnot;
 
 import framework.util.ProjectConfig;
 import framework.util.ProjectScanner;
+
+import framework.models.ModelView;
 
 @WebServlet("/")
 public class FrontServlet extends HttpServlet
@@ -119,6 +124,16 @@ public class FrontServlet extends HttpServlet
                                 break;
                             }
                             
+                        case "framework.models.ModelView":
+                            {
+                                ModelView mv = (ModelView) resultat;
+                                String vue = mv.getView();
+                                RequestDispatcher dispatcher = req.getRequestDispatcher(vue);
+                                dispatcher.forward(req, rep);
+                                break;
+                            }
+
+
                         default:
                             {
                                 PrintWriter writer = rep.getWriter();
