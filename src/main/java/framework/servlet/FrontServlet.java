@@ -128,6 +128,13 @@ public class FrontServlet extends HttpServlet
                             {
                                 ModelView mv = (ModelView) resultat;
                                 String vue = mv.getView();
+
+                                HashMap<String, Object> atts = mv.getAttributes();
+                                for (Map.Entry<String, Object> entry : atts.entrySet()) 
+                                {
+                                    req.setAttribute(entry.getKey(), entry.getValue());
+                                }
+                                
                                 RequestDispatcher dispatcher = req.getRequestDispatcher(vue);
                                 dispatcher.forward(req, rep);
                                 break;
