@@ -1,8 +1,11 @@
 package framework.models;
 
+import java.util.HashMap;
+
 public class ModelView
 {
     private String view;
+    private HashMap<String, Object> attributes = new HashMap<>();
 
     public ModelView(String view)
     {
@@ -19,4 +22,18 @@ public class ModelView
         this.view = view;
     }
 
+    public void addAttribute(String key, Object value)
+    {
+        this.attributes.put(key, value);
+    }
+
+    public HashMap<String, Object> getAttributes()
+    {
+        return attributes;
+    }
+
+    public Object getAttribute(String key)
+    {
+        return this.attributes.get(key);
+    }
 }
