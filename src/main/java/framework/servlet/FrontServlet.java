@@ -90,14 +90,26 @@ public class FrontServlet extends HttpServlet
 
             afficher(clazz, path, req, rep);
         }
-        // Introuvable
+        // Lien Dynamique (qui possède {})
         else
         {
-            PrintWriter writer = rep.getWriter();
-            writer.println("Chemin introuvable : ");
-            writer.println(path);
-            rep.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            for (Map.Entry<String, Class<?>> entry : routes.entrySet()) 
+            {
+                String route = entry.getKey();
+                Class<?> clazz = entry.getValue();
+
+                if (equalToDynamicLink(route, path))
+                {
+                    afficher(clazz, route, req, rep);
+                    return;
+                }
+            }
         }
+
+        PrintWriter writer = rep.getWriter();
+        writer.println("Chemin introuvable : ");
+        writer.println(path);
+        rep.setStatus(HttpServletResponse.SC_NOT_FOUND);
     }
 
     void afficher(Class<?> clazz, String path, HttpServletRequest req, HttpServletResponse rep) throws IOException, ServletException, ReflectiveOperationException
@@ -151,5 +163,11 @@ public class FrontServlet extends HttpServlet
                 }
             }
         }
+    }
+
+    public boolean equalToDynamicLink(String route, String path)
+    {
+        String regex = route.replaceAll("\\{[^/]+\\}", "[^/]+");
+        return path.matches(regex);
     }
 }
