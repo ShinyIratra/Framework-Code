@@ -100,7 +100,7 @@ public class FrontServlet extends HttpServlet
         {
             Class<?> clazz = routes.get(path);
 
-            afficher(clazz, path, req, rep);
+            show(clazz, path, req, rep);
         }
         // Lien Dynamique (qui possède {})
         else
@@ -109,10 +109,11 @@ public class FrontServlet extends HttpServlet
             {
                 String route = entry.getKey();
                 Class<?> clazz = entry.getValue();
+                HashMap<String, String> pathVariables = new HashMap<>();
 
-                if (equalToDynamicLink(route, path))
+                if (extractPathVariables(route, path, pathVariables))
                 {
-                    afficher(clazz, route, req, rep);
+                    showDynamic(clazz, route, req, rep, pathVariables);
                     return;
                 }
             }
@@ -125,7 +126,7 @@ public class FrontServlet extends HttpServlet
 
     }
 
-    void afficher(Class<?> clazz, String path, HttpServletRequest req, HttpServletResponse rep) throws IOException, ServletException, ReflectiveOperationException
+    void showDynamic(Class<?> clazz, String path, HttpServletRequest req, HttpServletResponse rep, HashMap<String, String> pathVariables) throws IOException, ServletException, ReflectiveOperationException
     {
         Method[] methods = clazz.getMethods();
         for (Method method : methods)
@@ -142,23 +143,19 @@ public class FrontServlet extends HttpServlet
                     Object[] args = new Object[params.length];
 
                     // Mapper les paramètres de la méthode avec les données de la requête
-                    for (int i = 0; i < params.length; i++)
-                    {
-                        if(params[i].isAnnotationPresent(RequestParam.class))
-                        {
+                    for (int i = 0; i < params.length; i++) {
+                        if (params[i].isAnnotationPresent(RequestParam.class)) {
+                            // Si le paramètre est annoté avec @RequestParam
                             RequestParam reqParam = params[i].getAnnotation(RequestParam.class);
-                            String paramName = reqParam.value();
-                            String paramValue = req.getParameter(paramName);
+                            String paramName = reqParam.value(); // Nom défini dans l'annotation
+                            String paramValue = pathVariables.get(paramName); // Récupérer depuis pathVariables
                             args[i] = paramValue; // Assigner la valeur (null si absente)
-                            continue;
-                        }
-                        else
-                        {
+                        } else {
+                            // Si pas d'annotation, utiliser le nom du paramètre
                             String paramName = params[i].getName(); // Nom du paramètre
-                            String paramValue = req.getParameter(paramName); // Valeur venant du formulaire
+                            String paramValue = pathVariables.get(paramName); // Récupérer depuis pathVariables
                             args[i] = paramValue; // Assigner la valeur (null si absente)
                         }
-                        
                     }
 
                     // Invoquer la méthode avec les arguments mappés
@@ -204,9 +201,98 @@ public class FrontServlet extends HttpServlet
         }
     }
 
-    public boolean equalToDynamicLink(String route, String path)
+    void show(Class<?> clazz, String path, HttpServletRequest req, HttpServletResponse rep) throws IOException, ServletException, ReflectiveOperationException
     {
-        String regex = route.replaceAll("\\{[^/]+\\}", "[^/]+");
-        return path.matches(regex);
+        Method[] methods = clazz.getMethods();
+        for (Method method : methods)
+        {
+            if (method.isAnnotationPresent(UrlAnnot.class))
+            {
+                UrlAnnot url = method.getAnnotation(UrlAnnot.class);
+
+                if (url.value().equals(path))
+                {
+                    Object instance = clazz.getDeclaredConstructor().newInstance();
+
+                    Parameter[] params = method.getParameters();
+                    Object[] args = new Object[params.length];
+
+                    // Mapper les paramètres de la méthode avec les données de la requête
+                    for (int i = 0; i < params.length; i++)
+                    {
+                        if(params[i].isAnnotationPresent(RequestParam.class))
+                        {
+                            RequestParam reqParam = params[i].getAnnotation(RequestParam.class);
+                            String paramName = reqParam.value();
+                            String paramValue = req.getParameter(paramName);
+                            args[i] = paramValue; // Assigner la valeur (null si absente)
+                            continue;
+                        }
+                        else
+                        {
+                            String paramName = params[i].getName(); // Nom du paramètre
+                            String paramValue = req.getParameter(paramName); // Valeur venant du formulaire
+                            args[i] = paramValue; // Assigner la valeur (null si absente)
+                        }
+                    }
+
+                    // Invoquer la méthode avec les arguments mappés
+                    Object resultat = method.invoke(instance, args);
+
+                    // Gérer le type de retour
+                    switch (method.getReturnType().getName())
+                    {
+                        case "java.lang.String":
+                            {
+                                PrintWriter writer = rep.getWriter();
+                                String vue = (String) resultat;
+                                writer.println(vue);
+                                break;
+                            }
+
+                        case "framework.models.ModelView":
+                            {
+                                ModelView mv = (ModelView) resultat;
+                                String vue = mv.getView();
+
+                                HashMap<String, Object> atts = mv.getAttributes();
+                                for (Map.Entry<String, Object> entry : atts.entrySet())
+                                {
+                                    req.setAttribute(entry.getKey(), entry.getValue());
+                                }
+
+                                RequestDispatcher dispatcher = req.getRequestDispatcher(vue);
+                                dispatcher.forward(req, rep);
+                                break;
+                            }
+
+
+                        default:
+                            {
+                                PrintWriter writer = rep.getWriter();
+                                writer.println("Type de retour non géré : " + method.getReturnType().getName());
+                                break;
+                            }
+                    }
+                }
+            }
+        }
+    }
+
+    // Corrected extractPathVariables method
+    public boolean extractPathVariables(String route, String path, Map<String, String> pathVariables) {
+        String regex = route.replaceAll("\\{([^/]+)\\}", "([^/]+)");
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(regex);
+        java.util.regex.Matcher matcher = pattern.matcher(path);
+
+        if (matcher.matches()) {
+            String[] paramNames = route.split("\\{");
+            for (int i = 1; i < paramNames.length; i++) {
+                String paramName = paramNames[i].split("}")[0];
+                pathVariables.put(paramName, matcher.group(i));
+            }
+            return true; // The path matches
+        }
+        return false; // The path does not match
     }
 }
