@@ -22,6 +22,7 @@ import javax.servlet.http.HttpServletResponse;
 */
 import framework.annotation.ControllerAnnot;
 import framework.annotation.UrlAnnot;
+import framework.annotation.RequestParam;
 
 import framework.util.ProjectConfig;
 import framework.util.ProjectScanner;
@@ -136,15 +137,28 @@ public class FrontServlet extends HttpServlet
                 if (url.value().equals(path))
                 {
                     Object instance = clazz.getDeclaredConstructor().newInstance();
+
                     Parameter[] params = method.getParameters();
                     Object[] args = new Object[params.length];
 
                     // Mapper les paramètres de la méthode avec les données de la requête
                     for (int i = 0; i < params.length; i++)
                     {
-                        String paramName = params[i].getName(); // Nom du paramètre
-                        String paramValue = req.getParameter(paramName); // Valeur venant du formulaire
-                        args[i] = paramValue; // Assigner la valeur (null si absente)
+                        if(params[i].isAnnotationPresent(RequestParam.class))
+                        {
+                            RequestParam reqParam = params[i].getAnnotation(RequestParam.class);
+                            String paramName = reqParam.value();
+                            String paramValue = req.getParameter(paramName);
+                            args[i] = paramValue; // Assigner la valeur (null si absente)
+                            continue;
+                        }
+                        else
+                        {
+                            String paramName = params[i].getName(); // Nom du paramètre
+                            String paramValue = req.getParameter(paramName); // Valeur venant du formulaire
+                            args[i] = paramValue; // Assigner la valeur (null si absente)
+                        }
+                        
                     }
 
                     // Invoquer la méthode avec les arguments mappés
