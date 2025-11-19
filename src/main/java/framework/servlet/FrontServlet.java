@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.Set;
 import java.util.List;
 import java.util.ArrayList;
+import java.lang.reflect.Parameter;
 
 import javax.servlet.RequestDispatcher;
 import javax.servlet.ServletException;
@@ -78,6 +79,16 @@ public class FrontServlet extends HttpServlet
         }
     }
 
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse rep) throws ServletException, IOException
+    {
+        try {
+            customRedirect(req, rep);
+        } catch (ReflectiveOperationException e) {
+            throw new ServletException("Error invoking controller method", e);
+        }
+    }
+
     private void customRedirect(HttpServletRequest req, HttpServletResponse rep) throws IOException, ServletException, ReflectiveOperationException
     {
         String path = req.getRequestURI().substring(req.getContextPath().length());
@@ -104,12 +115,13 @@ public class FrontServlet extends HttpServlet
                     return;
                 }
             }
+
+            PrintWriter writer = rep.getWriter();
+            writer.println("Chemin introuvable : ");
+            writer.println(path);
+            rep.setStatus(HttpServletResponse.SC_NOT_FOUND);
         }
 
-        PrintWriter writer = rep.getWriter();
-        writer.println("Chemin introuvable : ");
-        writer.println(path);
-        rep.setStatus(HttpServletResponse.SC_NOT_FOUND);
     }
 
     void afficher(Class<?> clazz, String path, HttpServletRequest req, HttpServletResponse rep) throws IOException, ServletException, ReflectiveOperationException
@@ -117,16 +129,29 @@ public class FrontServlet extends HttpServlet
         Method[] methods = clazz.getMethods();
         for (Method method : methods)
         {
-            if(method.isAnnotationPresent(UrlAnnot.class))
-            {   
+            if (method.isAnnotationPresent(UrlAnnot.class))
+            {
                 UrlAnnot url = method.getAnnotation(UrlAnnot.class);
 
-                if(url.value().equals(path))
+                if (url.value().equals(path))
                 {
                     Object instance = clazz.getDeclaredConstructor().newInstance();
-                    Object resultat = method.invoke(instance);
+                    Parameter[] params = method.getParameters();
+                    Object[] args = new Object[params.length];
 
-                    switch(method.getReturnType().getName())
+                    // Mapper les paramètres de la méthode avec les données de la requête
+                    for (int i = 0; i < params.length; i++)
+                    {
+                        String paramName = params[i].getName(); // Nom du paramètre
+                        String paramValue = req.getParameter(paramName); // Valeur venant du formulaire
+                        args[i] = paramValue; // Assigner la valeur (null si absente)
+                    }
+
+                    // Invoquer la méthode avec les arguments mappés
+                    Object resultat = method.invoke(instance, args);
+
+                    // Gérer le type de retour
+                    switch (method.getReturnType().getName())
                     {
                         case "java.lang.String":
                             {
@@ -135,18 +160,18 @@ public class FrontServlet extends HttpServlet
                                 writer.println(vue);
                                 break;
                             }
-                            
+
                         case "framework.models.ModelView":
                             {
                                 ModelView mv = (ModelView) resultat;
                                 String vue = mv.getView();
 
                                 HashMap<String, Object> atts = mv.getAttributes();
-                                for (Map.Entry<String, Object> entry : atts.entrySet()) 
+                                for (Map.Entry<String, Object> entry : atts.entrySet())
                                 {
                                     req.setAttribute(entry.getKey(), entry.getValue());
                                 }
-                                
+
                                 RequestDispatcher dispatcher = req.getRequestDispatcher(vue);
                                 dispatcher.forward(req, rep);
                                 break;
