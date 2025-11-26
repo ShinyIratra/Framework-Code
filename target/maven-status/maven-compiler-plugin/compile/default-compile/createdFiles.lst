@@ -3,5 +3,7 @@ framework\servlet\FrontServlet.class
 framework\annotation\ControllerAnnot.class
 framework\util\ProjectConfig.class
 framework\models\ModelView.class
+framework\models\Route.class
 framework\annotation\UrlAnnot.class
+framework\annotation\MethodMapping.class
 framework\annotation\RequestParam.class
