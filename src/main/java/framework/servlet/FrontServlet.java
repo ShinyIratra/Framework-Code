@@ -3,12 +3,14 @@ package framework.servlet;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.lang.reflect.Method;
-import java.util.Map;
-import java.util.HashMap;
-import java.util.Set;
-import java.util.List;
-import java.util.ArrayList;
 import java.lang.reflect.Parameter;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.servlet.RequestDispatcher;
 import javax.servlet.ServletException;
@@ -17,282 +19,209 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-/** 
-    Import custom
-*/
 import framework.annotation.ControllerAnnot;
-import framework.annotation.UrlAnnot;
+import framework.annotation.MethodMapping;
 import framework.annotation.RequestParam;
-
+import framework.annotation.UrlAnnot;
+import framework.models.ModelView;
+import framework.models.Route;
 import framework.util.ProjectConfig;
 import framework.util.ProjectScanner;
 
-import framework.models.ModelView;
-
 @WebServlet("/")
-public class FrontServlet extends HttpServlet
-{
-    private Map<String, Class<?>> routes = new HashMap<>();
+public class FrontServlet extends HttpServlet {
+    
+    private List<Route> routes = new ArrayList<>();
 
     @Override
-    public void init() throws ServletException
-    {
+    public void init() throws ServletException {
         super.init();
-        System.out.println("Test Init FrontServlet");
+        try {
+            ProjectConfig config = new ProjectConfig();
+            String basePackage = config.getProperty("PACKAGE_RACINE");
+            
+            ProjectScanner scanner = new ProjectScanner(basePackage);
+            Set<Class<?>> projectClasses = scanner.getAllProjectClasses();
 
-        ProjectConfig config = new ProjectConfig();
+            for (Class<?> clazz : projectClasses) {
+                if (clazz.isAnnotationPresent(ControllerAnnot.class)) {
+                    for (Method method : clazz.getMethods()) {
+                        if (method.isAnnotationPresent(UrlAnnot.class)) {
+                            UrlAnnot urlAnnot = method.getAnnotation(UrlAnnot.class);
+                            String url = urlAnnot.value();
+                            
+                            String httpMethod = "GET"; // Valeur par défaut
+                            if (method.isAnnotationPresent(MethodMapping.class)) {
+                                httpMethod = method.getAnnotation(MethodMapping.class).value();
+                            }
 
-        String basePackage = config.getProperty("PACKAGE_RACINE");
-
-        System.out.println("Base package: " + basePackage);
-        
-        ProjectScanner scanner = new ProjectScanner(basePackage);
-        Set<Class<?>> projectClasses = scanner.getAllProjectClasses();
-        List<Class<?>> listClasses = new ArrayList<>(projectClasses);
-
-        for (Class<?> clazz : listClasses)
-        {
-            if (clazz.isAnnotationPresent(ControllerAnnot.class))
-            {
-                // Récupère les fonctions publiques
-                Method[] methods = clazz.getMethods();
-                for (Method method : methods)
-                {
-                    if (method.isAnnotationPresent(UrlAnnot.class))
-                    {
-                        UrlAnnot urlAnnot = method.getAnnotation(UrlAnnot.class);
-                        String url = urlAnnot.value();
-                        routes.put(url, clazz);
+                            // On ajoute la route à la liste (avec l'URL dans l'objet Route)
+                            Route route = new Route(clazz, method, httpMethod, url);
+                            routes.add(route);
+                        }
                     }
                 }
             }
-        }
-
-    }
-
-    @Override
-    protected void doGet(HttpServletRequest req, HttpServletResponse rep) throws ServletException, IOException
-    {
-        try {
-            customRedirect(req, rep);
-        } catch (ReflectiveOperationException e) {
-            throw new ServletException("Error invoking controller method", e);
+        } catch (Exception e) {
+            throw new ServletException("Erreur Init FrontServlet", e);
         }
     }
 
     @Override
-    protected void doPost(HttpServletRequest req, HttpServletResponse rep) throws ServletException, IOException
-    {
-        try {
-            customRedirect(req, rep);
-        } catch (ReflectiveOperationException e) {
-            throw new ServletException("Error invoking controller method", e);
-        }
+    protected void doGet(HttpServletRequest req, HttpServletResponse rep) throws ServletException, IOException {
+        processRequest(req, rep);
     }
 
-    private void customRedirect(HttpServletRequest req, HttpServletResponse rep) throws IOException, ServletException, ReflectiveOperationException
-    {
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse rep) throws ServletException, IOException {
+        processRequest(req, rep);
+    }
+
+    private void processRequest(HttpServletRequest req, HttpServletResponse rep) throws IOException, ServletException {
         String path = req.getRequestURI().substring(req.getContextPath().length());
+        String httpMethod = req.getMethod();
 
-        boolean pathExists = getServletContext().getResource(path) != null;
+        // Map qui contiendra les variables d'URL si trouvées (ex: id -> 5)
+        HashMap<String, String> pathVariables = new HashMap<>();
+        
+        // Recherche de la route
+        Route route = findRoute(path, httpMethod, pathVariables);
 
-        if (routes.containsKey(path))
-        {
-            Class<?> clazz = routes.get(path);
-
-            show(clazz, path, req, rep);
-        }
-        // Lien Dynamique (qui possède {})
-        else
-        {
-            for (Map.Entry<String, Class<?>> entry : routes.entrySet()) 
-            {
-                String route = entry.getKey();
-                Class<?> clazz = entry.getValue();
-                HashMap<String, String> pathVariables = new HashMap<>();
-
-                if (extractPathVariables(route, path, pathVariables))
-                {
-                    showDynamic(clazz, route, req, rep, pathVariables);
-                    return;
-                }
+        if (route != null) {
+            try {
+                executeController(route, pathVariables, req, rep);
+            } catch (Exception e) {
+                e.printStackTrace();
+                rep.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, e.getMessage());
             }
+        } else {
 
             PrintWriter writer = rep.getWriter();
-            writer.println("Chemin introuvable : ");
-            writer.println(path);
-            rep.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            writer.println("URL Introuvable : " + path);
+            // rep.sendError(HttpServletResponse.SC_NOT_FOUND, "Route introuvable : " + path);
         }
-
     }
 
-    void showDynamic(Class<?> clazz, String path, HttpServletRequest req, HttpServletResponse rep, HashMap<String, String> pathVariables) throws IOException, ServletException, ReflectiveOperationException
-    {
-        Method[] methods = clazz.getMethods();
-        for (Method method : methods)
-        {
-            if (method.isAnnotationPresent(UrlAnnot.class))
-            {
-                UrlAnnot url = method.getAnnotation(UrlAnnot.class);
+    /**
+     * Parcourt la liste des routes pour trouver celle qui correspond à l'URL et au verbe HTTP.
+     * Remplie pathVariables si c'est une URL dynamique.
+     */
+    private Route findRoute(String path, String httpMethod, Map<String, String> pathVariables) {
+        for (Route route : routes) {
+            // 1. Vérif Verbe HTTP (GET, POST...)
+            if (!route.getMethodHTTP().equalsIgnoreCase(httpMethod)) {
+                continue;
+            }
 
-                if (url.value().equals(path))
-                {
-                    Object instance = clazz.getDeclaredConstructor().newInstance();
+            String routeUrl = route.getUrl();
 
-                    Parameter[] params = method.getParameters();
-                    Object[] args = new Object[params.length];
+            // 2. Vérif Correspondance Exacte
+            if (routeUrl.equals(path)) {
+                return route;
+            }
 
-                    // Mapper les paramètres de la méthode avec les données de la requête
-                    for (int i = 0; i < params.length; i++) {
-                        if (params[i].isAnnotationPresent(RequestParam.class)) {
-                            // Si le paramètre est annoté avec @RequestParam
-                            RequestParam reqParam = params[i].getAnnotation(RequestParam.class);
-                            String paramName = reqParam.value(); // Nom défini dans l'annotation
-                            String paramValue = pathVariables.get(paramName); // Récupérer depuis pathVariables
-                            args[i] = paramValue; // Assigner la valeur (null si absente)
-                        } else {
-                            // Si pas d'annotation, utiliser le nom du paramètre
-                            String paramName = params[i].getName(); // Nom du paramètre
-                            String paramValue = pathVariables.get(paramName); // Récupérer depuis pathVariables
-                            args[i] = paramValue; // Assigner la valeur (null si absente)
-                        }
-                    }
-
-                    // Invoquer la méthode avec les arguments mappés
-                    Object resultat = method.invoke(instance, args);
-
-                    // Gérer le type de retour
-                    switch (method.getReturnType().getName())
-                    {
-                        case "java.lang.String":
-                            {
-                                PrintWriter writer = rep.getWriter();
-                                String vue = (String) resultat;
-                                writer.println(vue);
-                                break;
-                            }
-
-                        case "framework.models.ModelView":
-                            {
-                                ModelView mv = (ModelView) resultat;
-                                String vue = mv.getView();
-
-                                HashMap<String, Object> atts = mv.getAttributes();
-                                for (Map.Entry<String, Object> entry : atts.entrySet())
-                                {
-                                    req.setAttribute(entry.getKey(), entry.getValue());
-                                }
-
-                                RequestDispatcher dispatcher = req.getRequestDispatcher(vue);
-                                dispatcher.forward(req, rep);
-                                break;
-                            }
-
-
-                        default:
-                            {
-                                PrintWriter writer = rep.getWriter();
-                                writer.println("Type de retour non géré : " + method.getReturnType().getName());
-                                break;
-                            }
-                    }
-                }
+            // 3. Vérif Regex (Dynamique)
+            // On vide la map temporaire avant de tester
+            pathVariables.clear(); 
+            if (isUrlMatch(routeUrl, path, pathVariables)) {
+                return route;
             }
         }
+        return null;
     }
 
-    void show(Class<?> clazz, String path, HttpServletRequest req, HttpServletResponse rep) throws IOException, ServletException, ReflectiveOperationException
-    {
-        Method[] methods = clazz.getMethods();
-        for (Method method : methods)
-        {
-            if (method.isAnnotationPresent(UrlAnnot.class))
-            {
-                UrlAnnot url = method.getAnnotation(UrlAnnot.class);
-
-                if (url.value().equals(path))
-                {
-                    Object instance = clazz.getDeclaredConstructor().newInstance();
-
-                    Parameter[] params = method.getParameters();
-                    Object[] args = new Object[params.length];
-
-                    // Mapper les paramètres de la méthode avec les données de la requête
-                    for (int i = 0; i < params.length; i++)
-                    {
-                        if(params[i].isAnnotationPresent(RequestParam.class))
-                        {
-                            RequestParam reqParam = params[i].getAnnotation(RequestParam.class);
-                            String paramName = reqParam.value();
-                            String paramValue = req.getParameter(paramName);
-                            args[i] = paramValue; // Assigner la valeur (null si absente)
-                            continue;
-                        }
-                        else
-                        {
-                            String paramName = params[i].getName(); // Nom du paramètre
-                            String paramValue = req.getParameter(paramName); // Valeur venant du formulaire
-                            args[i] = paramValue; // Assigner la valeur (null si absente)
-                        }
-                    }
-
-                    // Invoquer la méthode avec les arguments mappés
-                    Object resultat = method.invoke(instance, args);
-
-                    // Gérer le type de retour
-                    switch (method.getReturnType().getName())
-                    {
-                        case "java.lang.String":
-                            {
-                                PrintWriter writer = rep.getWriter();
-                                String vue = (String) resultat;
-                                writer.println(vue);
-                                break;
-                            }
-
-                        case "framework.models.ModelView":
-                            {
-                                ModelView mv = (ModelView) resultat;
-                                String vue = mv.getView();
-
-                                HashMap<String, Object> atts = mv.getAttributes();
-                                for (Map.Entry<String, Object> entry : atts.entrySet())
-                                {
-                                    req.setAttribute(entry.getKey(), entry.getValue());
-                                }
-
-                                RequestDispatcher dispatcher = req.getRequestDispatcher(vue);
-                                dispatcher.forward(req, rep);
-                                break;
-                            }
-
-
-                        default:
-                            {
-                                PrintWriter writer = rep.getWriter();
-                                writer.println("Type de retour non géré : " + method.getReturnType().getName());
-                                break;
-                            }
-                    }
-                }
-            }
-        }
-    }
-
-    // Corrected extractPathVariables method
-    public boolean extractPathVariables(String route, String path, Map<String, String> pathVariables) {
-        String regex = route.replaceAll("\\{([^/]+)\\}", "([^/]+)");
-        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(regex);
-        java.util.regex.Matcher matcher = pattern.matcher(path);
+    private boolean isUrlMatch(String routeUrl, String path, Map<String, String> pathVariables) {
+        // Transforme /user/{id} en /user/([^/]+)
+        String regex = "^" + routeUrl.replaceAll("\\{([^/]+)\\}", "([^/]+)") + "$";
+        Pattern pattern = Pattern.compile(regex);
+        Matcher matcher = pattern.matcher(path);
 
         if (matcher.matches()) {
-            String[] paramNames = route.split("\\{");
-            for (int i = 1; i < paramNames.length; i++) {
-                String paramName = paramNames[i].split("}")[0];
-                pathVariables.put(paramName, matcher.group(i));
+            // Récupère les noms des paramètres dans l'URL de la route
+            Pattern namePattern = Pattern.compile("\\{([^/]+)\\}");
+            Matcher nameMatcher = namePattern.matcher(routeUrl);
+            
+            int i = 1;
+            while (nameMatcher.find()) {
+                String paramName = nameMatcher.group(1);     // ex: "id"
+                String paramValue = matcher.group(i);        // ex: "12"
+                pathVariables.put(paramName, paramValue);
+                i++;
             }
-            return true; // The path matches
+            return true;
         }
-        return false; // The path does not match
+        return false;
+    }
+
+    private void executeController(Route route, Map<String, String> pathVariables, HttpServletRequest req, HttpServletResponse rep) throws Exception {
+        Method method = route.getMethod();
+        Object instance = route.getClazz().getDeclaredConstructor().newInstance();
+
+        // Récupération des arguments
+        Parameter[] params = method.getParameters();
+        Object[] args = new Object[params.length];
+
+        for (int i = 0; i < params.length; i++) {
+            Parameter param = params[i];
+            String paramName = param.getName();
+            String value = null;
+
+            // Priorité 1: Annotation @RequestParam
+            if (param.isAnnotationPresent(RequestParam.class)) {
+                paramName = param.getAnnotation(RequestParam.class).value();
+                // On cherche d'abord dans la requête classique (?id=...)
+                value = req.getParameter(paramName);
+                // Si null, on regarde dans les variables d'URL (/user/{id})
+                if (value == null && pathVariables.containsKey(paramName)) {
+                    value = pathVariables.get(paramName);
+                }
+            } 
+            // Priorité 2: Nom du paramètre
+            else {
+                // Cherche dans URL variables d'abord, puis query params
+                if (pathVariables.containsKey(paramName)) {
+                    value = pathVariables.get(paramName);
+                } else {
+                    value = req.getParameter(paramName);
+                }
+            }
+            
+            args[i] = castValue(value, param.getType());
+        }
+
+        // Invocation
+        Object returnValue = method.invoke(instance, args);
+
+        // Gestion du retour
+        if (returnValue instanceof ModelView) {
+            ModelView mv = (ModelView) returnValue;
+            for (Map.Entry<String, Object> entry : mv.getAttributes().entrySet()) {
+                req.setAttribute(entry.getKey(), entry.getValue());
+            }
+            RequestDispatcher dispatcher = req.getRequestDispatcher(mv.getView());
+            dispatcher.forward(req, rep);
+        } 
+        else if (returnValue instanceof String) {
+            PrintWriter out = rep.getWriter();
+            out.println((String) returnValue);
+        }
+        else {
+            // Gestion des types primitifs (int, float, etc.)
+            PrintWriter out = rep.getWriter();
+            out.println(String.valueOf(returnValue));
+        }
+    }
+
+    // Convertisseur simple String -> Type cible
+    private Object castValue(String value, Class<?> type) {
+        if (value == null) return null; // Ou valeur par défaut selon besoin
+
+        if (type == String.class) return value;
+        if (type == Integer.class || type == int.class) return Integer.parseInt(value);
+        if (type == Double.class || type == double.class) return Double.parseDouble(value);
+        if (type == Float.class || type == float.class) return Float.parseFloat(value);
+        if (type == Long.class || type == long.class) return Long.parseLong(value);
+        
+        return value; 
     }
 }
