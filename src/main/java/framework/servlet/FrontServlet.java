@@ -27,6 +27,7 @@ import framework.models.ModelView;
 import framework.models.Route;
 import framework.util.ProjectConfig;
 import framework.util.ProjectScanner;
+import framework.util.Convertor;
 
 @WebServlet("/")
 public class FrontServlet extends HttpServlet {
@@ -166,12 +167,35 @@ public class FrontServlet extends HttpServlet {
             String paramName = param.getName();
             String value = null;
 
+            // Si Map, on prend les arguments directement
+            if (param.getType().equals(Map.class)) 
+            {
+                Map<String, String[]> rawParameterMap = req.getParameterMap();
+                Map<String, Object[]> convertedParameterMap = new HashMap<>();
+
+                for (Map.Entry<String, String[]> entry : rawParameterMap.entrySet()) {
+                    String key = entry.getKey();
+                    String[] rawValues = entry.getValue();
+
+                    // Convertir chaque valeur dans le tableau
+                    Object[] convertedValues = new Object[rawValues.length];
+                    for (int j = 0; j < rawValues.length; j++) {
+                        convertedValues[j] = Convertor.detectAndCastValue(rawValues[j]);
+                    }
+
+                    convertedParameterMap.put(key, convertedValues);
+                }
+
+                args[i] = convertedParameterMap;
+                continue;
+            }
+
             // Priorité 1: Annotation @RequestParam
             if (param.isAnnotationPresent(RequestParam.class)) {
                 paramName = param.getAnnotation(RequestParam.class).value();
                 // On cherche d'abord dans la requête classique (?id=...)
                 value = req.getParameter(paramName);
-                // Si null, on regarde dans les variables d'URL (/user/{id})
+                // Si null, on d' regarde dans les variablesURL (/user/{id})
                 if (value == null && pathVariables.containsKey(paramName)) {
                     value = pathVariables.get(paramName);
                 }
