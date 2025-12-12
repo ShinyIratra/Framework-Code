@@ -28,6 +28,7 @@ import framework.models.Route;
 import framework.util.ProjectConfig;
 import framework.util.ProjectScanner;
 import framework.util.Convertor;
+import framework.util.ObjectMapper;
 
 @WebServlet("/")
 public class FrontServlet extends HttpServlet {
@@ -166,11 +167,11 @@ public class FrontServlet extends HttpServlet {
             Parameter param = params[i];
             String paramName = param.getName();
             String value = null;
+            Map<String, String[]> rawParameterMap = req.getParameterMap();
 
             // Si Map, on prend les arguments directement
             if (param.getType().equals(Map.class)) 
             {
-                Map<String, String[]> rawParameterMap = req.getParameterMap();
                 Map<String, Object[]> convertedParameterMap = new HashMap<>();
 
                 for (Map.Entry<String, String[]> entry : rawParameterMap.entrySet()) {
@@ -188,6 +189,24 @@ public class FrontServlet extends HttpServlet {
 
                 args[i] = convertedParameterMap;
                 continue;
+            }
+
+            // Vérifier si c'est un objet complexe (pas primitif, pas String, pas Map)
+            if (!isPrimitiveOrWrapper(param.getType()) && 
+                param.getType() != String.class && 
+                !param.getType().equals(Map.class)) {
+                
+                // Tenter le mapping automatique
+                try {
+                    Object mappedObject = ObjectMapper.mapToObject(rawParameterMap, param.getType(), paramName);
+                    if (mappedObject != null) {
+                        args[i] = mappedObject;
+                        continue;
+                    }
+                } catch (Exception e) {
+                    System.err.println("Erreur lors du mapping de l'objet " + paramName + ": " + e.getMessage());
+                    e.printStackTrace();
+                }
             }
 
             // Priorité 1: Annotation @RequestParam
@@ -247,5 +266,18 @@ public class FrontServlet extends HttpServlet {
         if (type == Long.class || type == long.class) return Long.parseLong(value);
         
         return value; 
+    }
+
+    // Vérifie si un type est primitif ou wrapper
+    private boolean isPrimitiveOrWrapper(Class<?> type) {
+        return type.isPrimitive() ||
+               type == Integer.class ||
+               type == Long.class ||
+               type == Double.class ||
+               type == Float.class ||
+               type == Boolean.class ||
+               type == Character.class ||
+               type == Byte.class ||
+               type == Short.class;
     }
 }

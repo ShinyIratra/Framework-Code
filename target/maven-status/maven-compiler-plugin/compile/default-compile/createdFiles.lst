@@ -8,3 +8,4 @@ framework\models\Route.class
 framework\annotation\UrlAnnot.class
 framework\annotation\MethodMapping.class
 framework\annotation\RequestParam.class
+framework\util\ObjectMapper.class
