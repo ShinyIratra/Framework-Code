@@ -1,5 +1,6 @@
 framework\util\ProjectScanner.class
 framework\servlet\FrontServlet.class
+framework\util\Convertor.class
 framework\annotation\ControllerAnnot.class
 framework\util\ProjectConfig.class
 framework\models\ModelView.class
