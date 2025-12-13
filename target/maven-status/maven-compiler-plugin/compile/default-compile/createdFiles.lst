@@ -6,6 +6,7 @@ framework\util\ProjectConfig.class
 framework\models\ModelView.class
 framework\models\Route.class
 framework\annotation\UrlAnnot.class
+framework\annotation\JsonAnnot.class
 framework\annotation\MethodMapping.class
 framework\annotation\RequestParam.class
 framework\util\ObjectMapper.class

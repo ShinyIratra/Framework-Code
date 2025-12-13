@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
+import java.util.Collection;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -23,6 +24,7 @@ import framework.annotation.ControllerAnnot;
 import framework.annotation.MethodMapping;
 import framework.annotation.RequestParam;
 import framework.annotation.UrlAnnot;
+import framework.annotation.JsonAnnot;
 import framework.models.ModelView;
 import framework.models.Route;
 import framework.util.ProjectConfig;
@@ -235,24 +237,61 @@ public class FrontServlet extends HttpServlet {
         // Invocation
         Object returnValue = method.invoke(instance, args);
 
-        // Gestion du retour
-        if (returnValue instanceof ModelView) {
-            ModelView mv = (ModelView) returnValue;
-            for (Map.Entry<String, Object> entry : mv.getAttributes().entrySet()) {
-                req.setAttribute(entry.getKey(), entry.getValue());
+        if (method.isAnnotationPresent(JsonAnnot.class)) 
+        {
+            // Utilisation de Jackson pour sérialiser l'objet en JSON
+            com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            rep.setContentType("application/json");
+            rep.setCharacterEncoding("UTF-8");
+
+            // Construire la réponse JSON
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("code", HttpServletResponse.SC_OK);
+
+            // Si c'est une Collection ou List, ajouter le count
+            if (returnValue instanceof Collection<?>) {
+                Map<String, Object> dataMap = new HashMap<>();
+                dataMap.put("count", ((Collection<?>) returnValue).size());
+                dataMap.put("items", returnValue);
+                response.put("data", dataMap);
+            } else if (returnValue instanceof Map<?, ?>) {
+                Map<String, Object> dataMap = new HashMap<>();
+                dataMap.put("count", ((Map<?, ?>) returnValue).size());
+                dataMap.put("items", returnValue);
+                response.put("data", dataMap);
+            } else {
+                // Pour un objet simple
+                response.put("data", returnValue);
             }
-            RequestDispatcher dispatcher = req.getRequestDispatcher(mv.getView());
-            dispatcher.forward(req, rep);
-        } 
-        else if (returnValue instanceof String) {
+
+            // Écrire la réponse JSON
             PrintWriter out = rep.getWriter();
-            out.println((String) returnValue);
+            out.print(objectMapper.writeValueAsString(response));
+            out.flush();
         }
-        else {
-            // Gestion des types primitifs (int, float, etc.)
-            PrintWriter out = rep.getWriter();
-            out.println(String.valueOf(returnValue));
+        else
+        {
+            // Gestion du retour
+            if (returnValue instanceof ModelView) {
+                ModelView mv = (ModelView) returnValue;
+                for (Map.Entry<String, Object> entry : mv.getAttributes().entrySet()) {
+                    req.setAttribute(entry.getKey(), entry.getValue());
+                }
+                RequestDispatcher dispatcher = req.getRequestDispatcher(mv.getView());
+                dispatcher.forward(req, rep);
+            } 
+            else if (returnValue instanceof String) {
+                PrintWriter out = rep.getWriter();
+                out.println((String) returnValue);
+            }
+            else {
+                // Gestion des types primitifs (int, float, etc.)
+                PrintWriter out = rep.getWriter();
+                out.println(String.valueOf(returnValue));
+            }
         }
+
     }
 
     // Convertisseur simple String -> Type cible
