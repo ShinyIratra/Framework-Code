@@ -1,11 +1,14 @@
 package framework.servlet;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintWriter;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
-import java.util.Collection;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,10 +18,12 @@ import java.util.regex.Pattern;
 
 import javax.servlet.RequestDispatcher;
 import javax.servlet.ServletException;
+import javax.servlet.annotation.MultipartConfig;
 import javax.servlet.annotation.WebServlet;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import javax.servlet.http.Part;
 
 import framework.annotation.ControllerAnnot;
 import framework.annotation.MethodMapping;
@@ -33,6 +38,7 @@ import framework.util.Convertor;
 import framework.util.ObjectMapper;
 
 @WebServlet("/")
+@MultipartConfig
 public class FrontServlet extends HttpServlet {
     
     private List<Route> routes = new ArrayList<>();
@@ -54,12 +60,11 @@ public class FrontServlet extends HttpServlet {
                             UrlAnnot urlAnnot = method.getAnnotation(UrlAnnot.class);
                             String url = urlAnnot.value();
                             
-                            String httpMethod = "GET"; // Valeur par défaut
+                            String httpMethod = "GET"; 
                             if (method.isAnnotationPresent(MethodMapping.class)) {
                                 httpMethod = method.getAnnotation(MethodMapping.class).value();
                             }
 
-                            // On ajoute la route à la liste (avec l'URL dans l'objet Route)
                             Route route = new Route(clazz, method, httpMethod, url);
                             routes.add(route);
                         }
@@ -85,47 +90,33 @@ public class FrontServlet extends HttpServlet {
         String path = req.getRequestURI().substring(req.getContextPath().length());
         String httpMethod = req.getMethod();
 
-        // Map qui contiendra les variables d'URL si trouvées (ex: id -> 5)
         HashMap<String, String> pathVariables = new HashMap<>();
-        
-        // Recherche de la route
         Route route = findRoute(path, httpMethod, pathVariables);
+        PrintWriter writer = rep.getWriter();
 
         if (route != null) {
             try {
                 executeController(route, pathVariables, req, rep);
             } catch (Exception e) {
                 e.printStackTrace();
-                rep.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, e.getMessage());
+                writer.println("Erreur Serveur: " + e.getMessage());
             }
         } else {
-
-            PrintWriter writer = rep.getWriter();
-            writer.println("URL Introuvable : " + path);
-            // rep.sendError(HttpServletResponse.SC_NOT_FOUND, "Route introuvable : " + path);
+            writer.println("Route introuvable : " + path);
         }
     }
 
-    /**
-     * Parcourt la liste des routes pour trouver celle qui correspond à l'URL et au verbe HTTP.
-     * Remplie pathVariables si c'est une URL dynamique.
-     */
     private Route findRoute(String path, String httpMethod, Map<String, String> pathVariables) {
         for (Route route : routes) {
-            // 1. Vérif Verbe HTTP (GET, POST...)
             if (!route.getMethodHTTP().equalsIgnoreCase(httpMethod)) {
                 continue;
             }
 
             String routeUrl = route.getUrl();
-
-            // 2. Vérif Correspondance Exacte
             if (routeUrl.equals(path)) {
                 return route;
             }
 
-            // 3. Vérif Regex (Dynamique)
-            // On vide la map temporaire avant de tester
             pathVariables.clear(); 
             if (isUrlMatch(routeUrl, path, pathVariables)) {
                 return route;
@@ -135,20 +126,18 @@ public class FrontServlet extends HttpServlet {
     }
 
     private boolean isUrlMatch(String routeUrl, String path, Map<String, String> pathVariables) {
-        // Transforme /user/{id} en /user/([^/]+)
         String regex = "^" + routeUrl.replaceAll("\\{([^/]+)\\}", "([^/]+)") + "$";
         Pattern pattern = Pattern.compile(regex);
         Matcher matcher = pattern.matcher(path);
 
         if (matcher.matches()) {
-            // Récupère les noms des paramètres dans l'URL de la route
             Pattern namePattern = Pattern.compile("\\{([^/]+)\\}");
             Matcher nameMatcher = namePattern.matcher(routeUrl);
             
             int i = 1;
             while (nameMatcher.find()) {
-                String paramName = nameMatcher.group(1);     // ex: "id"
-                String paramValue = matcher.group(i);        // ex: "12"
+                String paramName = nameMatcher.group(1);     
+                String paramValue = matcher.group(i);        
                 pathVariables.put(paramName, paramValue);
                 i++;
             }
@@ -160,45 +149,99 @@ public class FrontServlet extends HttpServlet {
     private void executeController(Route route, Map<String, String> pathVariables, HttpServletRequest req, HttpServletResponse rep) throws Exception {
         Method method = route.getMethod();
         Object instance = route.getClazz().getDeclaredConstructor().newInstance();
-
-        // Récupération des arguments
         Parameter[] params = method.getParameters();
         Object[] args = new Object[params.length];
 
         for (int i = 0; i < params.length; i++) {
             Parameter param = params[i];
             String paramName = param.getName();
-            String value = null;
             Map<String, String[]> rawParameterMap = req.getParameterMap();
 
-            // Si Map, on prend les arguments directement
-            if (param.getType().equals(Map.class)) 
-            {
-                Map<String, Object[]> convertedParameterMap = new HashMap<>();
+            // GESTION DES MAPS (Parameters ou Uploads)
+            // Dans ta boucle executeController...
 
-                for (Map.Entry<String, String[]> entry : rawParameterMap.entrySet()) {
-                    String key = entry.getKey();
-                    String[] rawValues = entry.getValue();
+            if (param.getType().equals(Map.class)) {
+                
+                // 1. Récupération du type générique de la Map (ex: Map<String, ???>)
+                ParameterizedType mapType = (ParameterizedType) param.getParameterizedType();
+                Type valueType = mapType.getActualTypeArguments()[1]; // On prend le 2ème argument (la Valeur)
 
-                    // Convertir chaque valeur dans le tableau
-                    Object[] convertedValues = new Object[rawValues.length];
-                    for (int j = 0; j < rawValues.length; j++) {
-                        convertedValues[j] = Convertor.detectAndCastValue(rawValues[j]);
+                boolean handled = false;
+
+                // -----------------------------------------------------
+                // CAS 1 : Upload Simple -> Map<String, byte[]>
+                // -----------------------------------------------------
+                // On compare directement l'objet Type avec la classe byte[]
+                if (valueType instanceof Class && ((Class<?>) valueType) == byte[].class) {
+                    
+                    Map<String, byte[]> fileMap = new HashMap<>();
+                    if (isMultipart(req)) {
+                        try {
+                            for (Part part : req.getParts()) {
+                                if (isPartFile(part)) {
+                                    try (InputStream is = part.getInputStream()) {
+                                        fileMap.put(part.getName(), is.readAllBytes());
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            System.err.println("Erreur upload byte[] : " + e.getMessage());
+                        }
                     }
-
-                    convertedParameterMap.put(key, convertedValues);
+                    args[i] = fileMap;
+                    handled = true;
                 }
 
-                args[i] = convertedParameterMap;
+                // -----------------------------------------------------
+                // CAS 2 : Upload Multiple -> Map<String, List<byte[]>>
+                // -----------------------------------------------------
+                // On vérifie structurellement si c'est une List<byte[]>
+                else if (isListOfByteArray(valueType)) {
+                    
+                    Map<String, List<byte[]>> multiFileMap = new HashMap<>();
+                    if (isMultipart(req)) {
+                        try {
+                            for (Part part : req.getParts()) {
+                                if (isPartFile(part)) {
+                                    multiFileMap.putIfAbsent(part.getName(), new ArrayList<>());
+                                    try (InputStream is = part.getInputStream()) {
+                                        multiFileMap.get(part.getName()).add(is.readAllBytes());
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            System.err.println("Erreur upload List<byte[]> : " + e.getMessage());
+                        }
+                    }
+                    args[i] = multiFileMap;
+                    handled = true;
+                }
+
+                // -----------------------------------------------------
+                // CAS 3 : Paramètres classiques -> Map<String, Object[]>
+                // -----------------------------------------------------
+                if (!handled) {
+                    // Ta logique existante pour convertir req.getParameterMap()
+                    Map<String, Object[]> convertedParameterMap = new HashMap<>();
+                    for (Map.Entry<String, String[]> entry : rawParameterMap.entrySet()) {
+                        String key = entry.getKey();
+                        String[] rawValues = entry.getValue();
+                        Object[] convertedValues = new Object[rawValues.length];
+                        for (int j = 0; j < rawValues.length; j++) {
+                            convertedValues[j] = Convertor.detectAndCastValue(rawValues[j]);
+                        }
+                        convertedParameterMap.put(key, convertedValues);
+                    }
+                    args[i] = convertedParameterMap;
+                }
                 continue;
             }
 
-            // Vérifier si c'est un objet complexe (pas primitif, pas String, pas Map)
+            // GESTION OBJETS COMPLEXES
             if (!isPrimitiveOrWrapper(param.getType()) && 
                 param.getType() != String.class && 
                 !param.getType().equals(Map.class)) {
                 
-                // Tenter le mapping automatique
                 try {
                     Object mappedObject = ObjectMapper.mapToObject(rawParameterMap, param.getType(), paramName);
                     if (mappedObject != null) {
@@ -206,24 +249,19 @@ public class FrontServlet extends HttpServlet {
                         continue;
                     }
                 } catch (Exception e) {
-                    System.err.println("Erreur lors du mapping de l'objet " + paramName + ": " + e.getMessage());
-                    e.printStackTrace();
+                    System.err.println("Mapping objet échoué: " + e.getMessage());
                 }
             }
 
-            // Priorité 1: Annotation @RequestParam
+            // GESTION TYPES SIMPLES (String, int...)
+            String value = null;
             if (param.isAnnotationPresent(RequestParam.class)) {
                 paramName = param.getAnnotation(RequestParam.class).value();
-                // On cherche d'abord dans la requête classique (?id=...)
                 value = req.getParameter(paramName);
-                // Si null, on d' regarde dans les variablesURL (/user/{id})
                 if (value == null && pathVariables.containsKey(paramName)) {
                     value = pathVariables.get(paramName);
                 }
-            } 
-            // Priorité 2: Nom du paramètre
-            else {
-                // Cherche dans URL variables d'abord, puis query params
+            } else {
                 if (pathVariables.containsKey(paramName)) {
                     value = pathVariables.get(paramName);
                 } else {
@@ -234,22 +272,18 @@ public class FrontServlet extends HttpServlet {
             args[i] = castValue(value, param.getType());
         }
 
-        // Invocation
+        // INVOCATION
         Object returnValue = method.invoke(instance, args);
 
-        if (method.isAnnotationPresent(JsonAnnot.class)) 
-        {
-            // Utilisation de Jackson pour sérialiser l'objet en JSON
+        // GESTION RETOUR (JSON vs VIEW)
+        if (method.isAnnotationPresent(JsonAnnot.class)) {
             com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            rep.setContentType("application/json");
-            rep.setCharacterEncoding("UTF-8");
-
-            // Construire la réponse JSON
+            rep.setContentType("application/json;charset=UTF-8");
+            
             Map<String, Object> response = new HashMap<>();
             response.put("status", "success");
             response.put("code", HttpServletResponse.SC_OK);
 
-            // Si c'est une Collection ou List, ajouter le count
             if (returnValue instanceof Collection<?>) {
                 Map<String, Object> dataMap = new HashMap<>();
                 dataMap.put("count", ((Collection<?>) returnValue).size());
@@ -261,18 +295,13 @@ public class FrontServlet extends HttpServlet {
                 dataMap.put("items", returnValue);
                 response.put("data", dataMap);
             } else {
-                // Pour un objet simple
                 response.put("data", returnValue);
             }
 
-            // Écrire la réponse JSON
             PrintWriter out = rep.getWriter();
             out.print(objectMapper.writeValueAsString(response));
             out.flush();
-        }
-        else
-        {
-            // Gestion du retour
+        } else {
             if (returnValue instanceof ModelView) {
                 ModelView mv = (ModelView) returnValue;
                 for (Map.Entry<String, Object> entry : mv.getAttributes().entrySet()) {
@@ -280,34 +309,24 @@ public class FrontServlet extends HttpServlet {
                 }
                 RequestDispatcher dispatcher = req.getRequestDispatcher(mv.getView());
                 dispatcher.forward(req, rep);
-            } 
-            else if (returnValue instanceof String) {
-                PrintWriter out = rep.getWriter();
-                out.println((String) returnValue);
-            }
-            else {
-                // Gestion des types primitifs (int, float, etc.)
-                PrintWriter out = rep.getWriter();
-                out.println(String.valueOf(returnValue));
+            } else if (returnValue instanceof String) {
+                rep.getWriter().println((String) returnValue);
+            } else {
+                rep.getWriter().println(String.valueOf(returnValue));
             }
         }
-
     }
 
-    // Convertisseur simple String -> Type cible
     private Object castValue(String value, Class<?> type) {
-        if (value == null) return null; // Ou valeur par défaut selon besoin
-
+        if (value == null) return null;
         if (type == String.class) return value;
         if (type == Integer.class || type == int.class) return Integer.parseInt(value);
         if (type == Double.class || type == double.class) return Double.parseDouble(value);
         if (type == Float.class || type == float.class) return Float.parseFloat(value);
         if (type == Long.class || type == long.class) return Long.parseLong(value);
-        
         return value; 
     }
 
-    // Vérifie si un type est primitif ou wrapper
     private boolean isPrimitiveOrWrapper(Class<?> type) {
         return type.isPrimitive() ||
                type == Integer.class ||
@@ -318,5 +337,38 @@ public class FrontServlet extends HttpServlet {
                type == Character.class ||
                type == Byte.class ||
                type == Short.class;
+    }
+
+    /**
+     * Vérifie si le type donné correspond exactement à List<byte[]>
+     */
+    private boolean isListOfByteArray(Type type) {
+        if (type instanceof ParameterizedType) {
+            ParameterizedType pType = (ParameterizedType) type;
+            // 1. Est-ce que le conteneur est une List ?
+            if (pType.getRawType().equals(List.class)) {
+                // 2. Est-ce que le générique interne est byte[] ?
+                Type[] args = pType.getActualTypeArguments();
+                if (args.length > 0 && args[0] == byte[].class) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Vérifie si la requête est multipart
+     */
+    private boolean isMultipart(HttpServletRequest req) {
+        String contentType = req.getContentType();
+        return contentType != null && contentType.startsWith("multipart/form-data");
+    }
+
+    /**
+     * Vérifie si une "Part" est bien un fichier (et non un champ texte)
+     */
+    private boolean isPartFile(Part part) {
+        return part.getSubmittedFileName() != null && !part.getSubmittedFileName().isEmpty();
     }
 }
