@@ -1,6 +1,7 @@
 framework\servlet\FrontServlet.class
 framework\util\Convertor.class
 framework\annotation\ControllerAnnot.class
+framework\annotation\AuthAnnot.class
 framework\annotation\JsonAnnot.class
 framework\util\ProjectScanner.class
 framework\util\ProjectConfig.class
