@@ -36,6 +36,7 @@ import framework.util.ProjectConfig;
 import framework.util.ProjectScanner;
 import framework.util.Convertor;
 import framework.util.ObjectMapper;
+import framework.util.FrameworkSession;
 
 @WebServlet("/")
 @MultipartConfig
@@ -156,6 +157,12 @@ public class FrontServlet extends HttpServlet {
             Parameter param = params[i];
             String paramName = param.getName();
             Map<String, String[]> rawParameterMap = req.getParameterMap();
+
+            // GESTION DES SESSIONS
+            if (param.getType().equals(FrameworkSession.class)) {
+                args[i] = new FrameworkSession(req.getSession());
+                continue; // On passe au paramètre suivant
+            }
 
             // GESTION DES MAPS (Parameters ou Uploads)
             // Dans ta boucle executeController...
