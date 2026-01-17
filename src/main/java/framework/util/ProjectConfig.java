@@ -16,7 +16,7 @@ public class ProjectConfig {
      */
     public ProjectConfig() {
         this.properties = new Properties();
-        this.configFilePath = "Project.config";
+        this.configFilePath = "app.properties";
         loadFromClasspath();
     }
     

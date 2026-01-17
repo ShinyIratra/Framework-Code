@@ -30,6 +30,7 @@ import framework.annotation.MethodMapping;
 import framework.annotation.RequestParam;
 import framework.annotation.UrlAnnot;
 import framework.annotation.JsonAnnot;
+import framework.annotation.AuthAnnot;
 import framework.models.ModelView;
 import framework.models.Route;
 import framework.util.ProjectConfig;
@@ -43,12 +44,12 @@ import framework.util.FrameworkSession;
 public class FrontServlet extends HttpServlet {
     
     private List<Route> routes = new ArrayList<>();
-
+    ProjectConfig config = new ProjectConfig();
+    
     @Override
     public void init() throws ServletException {
         super.init();
         try {
-            ProjectConfig config = new ProjectConfig();
             String basePackage = config.getProperty("PACKAGE_RACINE");
             
             ProjectScanner scanner = new ProjectScanner(basePackage);
@@ -96,6 +97,28 @@ public class FrontServlet extends HttpServlet {
         PrintWriter writer = rep.getWriter();
 
         if (route != null) {
+
+            // GESTION AUTHENTIFICATION
+            Method controller = route.getMethod();
+            if(controller.isAnnotationPresent(AuthAnnot.class)) 
+            {
+                AuthAnnot authAnnot = controller.getAnnotation(AuthAnnot.class);
+                String requiredRole = authAnnot.value();
+
+                FrameworkSession session = new FrameworkSession(req.getSession(false));
+                String userRole = (String) session.get(config.getProperty("AUTH_NAME"));
+
+                if(!requiredRole.isEmpty())
+                {
+                    if (userRole == null || !userRole.equals(requiredRole)) 
+                    {
+                        rep.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                        writer.println("Accès refusé : rôle requis - " + requiredRole);
+                        return;
+                    }
+                } 
+            }
+            
             try {
                 executeController(route, pathVariables, req, rep);
             } catch (Exception e) {
